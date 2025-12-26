@@ -1,2 +1,0 @@
-# Energy functions and potentials
-

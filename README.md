@@ -8,6 +8,16 @@ This repository contains simulations and notes exploring non-equilibrium thermod
 - `notes/`: Theoretical background and paper summaries.
 - `scripts/`: Simulation scripts and visualization notebooks.
 
+## Demos
+
+### Jarzynski & Crooks Fluctuation Theorems
+![Fluctuation Theorems Demo](assets/fluctuation_demo.gif)
+
+This simulation demonstrates:
+- **Top**: Forward trajectories of a particle in a driven harmonic trap, colored by accumulated work.
+- **Bottom Left**: Forward and reverse work distributions, illustrating the Crooks Fluctuation Theorem.
+- **Bottom Right**: Convergence of the Jarzynski free energy estimate with $1\sigma$ bootstrap uncertainty.
+
 ## Key References
 
 - [Sivak et al., 2011 (Shadow Work)](https://arxiv.org/pdf/1107.2967)
@@ -19,5 +29,14 @@ This repository contains simulations and notes exploring non-equilibrium thermod
 
 ```bash
 pip install -e .
+```
+
+## Running the Demo
+
+To run the simulation and regenerate the animation:
+
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)/src
+python scripts/demo_fluctuation_theorems.py
 ```
 

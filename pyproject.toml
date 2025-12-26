@@ -13,6 +13,8 @@ dependencies = [
     "scipy",
     "matplotlib",
     "tqdm",
+    "torch",
+    "imageio",
 ]
 
 [tool.setuptools.packages.find]

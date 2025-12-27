@@ -8,30 +8,11 @@ from noneq.potentials import HarmonicPotential
 from noneq.integrators import OverdampedLangevin
 from noneq.estimators import jarzynski_estimate, jarzynski_convergence
 
-# Applying plotting style from rules
-plt.rcParams.update({
-    "font.family": "monospace",
-    "font.monospace": ["DejaVu Sans Mono", "Menlo", "Consolas", "Monaco"],
-    "font.size": 12,
-    "axes.titlesize": 13,
-    "axes.labelsize": 12,
-    "xtick.labelsize": 11,
-    "ytick.labelsize": 11,
-    "legend.fontsize": 11,
-    "axes.grid": True,
-    "grid.alpha": 0.25,
-    "grid.linewidth": 0.7,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.titlepad": 8.0,
-    "axes.labelpad": 4.0,
-    "xtick.direction": "out",
-    "ytick.direction": "out",
-    "legend.frameon": False,
-    "figure.facecolor": "white",
-    "axes.facecolor": "white",
-    "savefig.facecolor": "white",
-})
+# Import shared plotting style
+from plot_style import apply_style, COLORS
+
+# Apply consistent style
+apply_style()
 
 def run_demo():
     # 1. Setup Parameters

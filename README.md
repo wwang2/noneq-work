@@ -13,6 +13,11 @@ This repository contains simulations and notes exploring non-equilibrium thermod
 ### Jarzynski & Crooks Fluctuation Theorems
 ![Fluctuation Theorems Demo](assets/fluctuation_demo.gif)
 
+### Shadow Work & Debiasing
+Demonstrating how finite-timestep discretization bias can be corrected using shadow work importance weights (based on [Sivak et al., 2013](https://arxiv.org/pdf/1107.2967)).
+
+![Work Reweighting Dashboard](assets/work_reweighting.png)
+
 
 ## Key References
 

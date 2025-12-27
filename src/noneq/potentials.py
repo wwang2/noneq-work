@@ -35,3 +35,31 @@ class HarmonicPotential(nn.Module):
         center = self.get_center(lmbda)
         d_center_dlambda = self.x_end - self.x_start
         return -self.k * (x - center) * d_center_dlambda
+
+class DoubleWellPotential(nn.Module):
+    """
+    Double well potential U(x) = a*x^4 - b*x^2 + c*x
+    where c = c(lambda) = (1 - lambda) * c_start + lambda * c_end
+    """
+    def __init__(self, a=1.0, b=2.0, c_start=0.0, c_end=0.0):
+        super().__init__()
+        self.a = a
+        self.b = b
+        self.c_start = c_start
+        self.c_end = c_end
+
+    def get_c(self, lmbda):
+        return (1.0 - lmbda) * self.c_start + lmbda * self.c_end
+
+    def forward(self, x, lmbda):
+        c = self.get_c(lmbda)
+        return self.a * x**4 - self.b * x**2 + c * x
+
+    def force(self, x, lmbda):
+        c = self.get_c(lmbda)
+        return -(4.0 * self.a * x**3 - 2.0 * self.b * x + c)
+
+    def dU_dlambda(self, x, lmbda):
+        # U = a*x^4 - b*x^2 + ((1-lmbda)*c_s + lmbda*c_e)*x
+        # dU/dlambda = (c_end - c_start) * x
+        return (self.c_end - self.c_start) * x

@@ -54,12 +54,14 @@ def run_demo():
     # 2. Run Forward Protocol
     print(f"Running Forward Protocol with {num_trajectories} samples...")
     x_init_fwd = torch.randn(num_trajectories) * np.sqrt(kT / k) + x_start
-    traj_fwd, works_fwd, final_works_fwd = integrator.run_protocol(x_init_fwd, lambdas_fwd)
+    traj_fwd, works_fwd, _ = integrator.run_protocol(x_init_fwd, lambdas_fwd)
+    final_works_fwd = works_fwd[-1]
     
     # 3. Run Reverse Protocol
     print(f"Running Reverse Protocol with {num_trajectories} samples...")
     x_init_rev = torch.randn(num_trajectories) * np.sqrt(kT / k) + x_end
-    traj_rev, works_rev, final_works_rev = integrator.run_protocol(x_init_rev, lambdas_rev)
+    traj_rev, works_rev, _ = integrator.run_protocol(x_init_rev, lambdas_rev)
+    final_works_rev = works_rev[-1]
     
     true_delta_f = 0.0
     

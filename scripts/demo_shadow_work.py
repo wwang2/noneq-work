@@ -25,59 +25,7 @@ plt.rcParams.update({
     "axes.facecolor": "white",
 })
 
-# --- Helper Classes (MALA, RWM) ---
-class MALAIntegrator:
-    """Metropolis-Adjusted Langevin Algorithm"""
-    def __init__(self, potential, gamma=1.0, kT=1.0, dt=0.01):
-        self.potential = potential
-        self.gamma = gamma
-        self.kT = kT
-        self.dt = dt
-        self.beta = 1.0 / kT
-    
-    def step(self, x, lmbda):
-        f_old = self.potential.force(x, lmbda)
-        u_old = self.potential(x, lmbda)
-        
-        if torch.isnan(f_old).any() or torch.abs(f_old).max() > 1e4:
-             return x, torch.zeros_like(x, dtype=torch.bool)
-
-        noise = torch.randn_like(x) * np.sqrt(2 * self.kT * self.dt / self.gamma)
-        x_new = x + (f_old / self.gamma) * self.dt + noise
-        
-        f_new = self.potential.force(x_new, lmbda)
-        u_new = self.potential(x_new, lmbda)
-        
-        mu_fwd = x + (f_old / self.gamma) * self.dt
-        log_q_fwd = - (x_new - mu_fwd)**2 / (4 * self.kT * self.dt / self.gamma)
-        
-        mu_rev = x_new + (f_new / self.gamma) * self.dt
-        log_q_rev = - (x - mu_rev)**2 / (4 * self.kT * self.dt / self.gamma)
-        
-        log_pi_ratio = -self.beta * (u_new - u_old)
-        log_ratio = log_pi_ratio + (log_q_rev - log_q_fwd)
-        
-        valid = torch.isfinite(log_ratio)
-        log_ratio[~valid] = -float('inf') 
-        
-        accept_prob = torch.exp(torch.clamp(log_ratio, max=0.0))
-        accepted = torch.rand_like(accept_prob) < accept_prob
-        final_x = torch.where(accepted, x_new, x)
-        
-        return final_x, accepted
-
-    def run(self, x_init, num_steps):
-        x = x_init.clone()
-        trajectories = [x.clone()]
-        accept_counts = torch.zeros_like(x)
-        
-        for _ in range(num_steps):
-            x, accepted = self.step(x, 0.0)
-            accept_counts += accepted.float()
-            trajectories.append(x.clone())
-            
-        return torch.stack(trajectories), accept_counts / num_steps
-
+# --- Helper Classes ---
 class UnderdampedLangevin:
     """
     Underdamped Langevin using BAOAB splitting.
@@ -158,57 +106,6 @@ class UnderdampedLangevin:
             
         return torch.stack(trajectories), torch.stack(shadow_works)
 
-class RWMIntegrator:
-    """Random Walk Metropolis"""
-    def __init__(self, potential, gamma=1.0, kT=1.0, dt=0.01):
-        self.potential = potential
-        self.kT = kT
-        self.beta = 1.0 / kT
-        self.sigma = np.sqrt(2 * kT * dt / gamma)
-    
-    def step(self, x, lmbda):
-        u_old = self.potential(x, lmbda)
-        x_new = x + torch.randn_like(x) * self.sigma
-        u_new = self.potential(x_new, lmbda)
-        log_ratio = -self.beta * (u_new - u_old)
-        accept_prob = torch.exp(torch.clamp(log_ratio, max=0.0))
-        accepted = torch.rand_like(accept_prob) < accept_prob
-        final_x = torch.where(accepted, x_new, x)
-        return final_x, accepted
-
-    def run(self, x_init, num_steps):
-        x = x_init.clone()
-        trajectories = [x.clone()]
-        accept_counts = torch.zeros_like(x)
-        for _ in range(num_steps):
-            x, accepted = self.step(x, 0.0)
-            accept_counts += accepted.float()
-            trajectories.append(x.clone())
-        return torch.stack(trajectories), accept_counts / num_steps
-
-def calculate_ess_dynamic(traj):
-    """ESS based on autocorrelation"""
-    traj = traj.numpy()
-    n_steps, n_chains = traj.shape
-    ess_values = []
-    
-    for i in range(n_chains):
-        chain = traj[:, i]
-        chain = chain - np.mean(chain)
-        c0 = np.var(chain)
-        if c0 == 0:
-            ess_values.append(1.0)
-            continue
-            
-        acf = np.correlate(chain, chain, mode='full')[n_steps-1:] / (c0 * n_steps)
-        cutoff = np.where(acf < 0.05)[0]
-        limit = cutoff[0] if len(cutoff) > 0 else len(acf) // 10
-        tau = 1 + 2 * np.sum(acf[1:limit])
-        ess = n_steps / tau
-        ess_values.append(ess)
-        
-    return np.mean(ess_values)
-
 def get_boltzmann_samples(potential, lmbda, kT, num_samples, x_range=(-2.5, 2.5)):
     """Sample from exact Boltzmann distribution using rejection sampling."""
     xs = torch.linspace(x_range[0], x_range[1], 1000)
@@ -278,7 +175,7 @@ def run_dashboard_demo():
     
     # Target dt for visualization
     dt_viz_over = 0.05
-    dt_viz_baoab = 0.5 # Requested large step for debiasing
+    dt_viz_baoab = 0.5 # Very large step to show visible bias and correction
     
     x_init = get_boltzmann_samples(potential, 0.0, kT, num_trajectories, x_range=(-2.5, 2.5)).to(device)
     
@@ -299,23 +196,34 @@ def run_dashboard_demo():
     weights_o = torch.exp(log_weights_norm_o) * len(log_weights_o)
     ess_over = (weights_o.sum()**2) / (weights_o**2).sum()
     
-    # 1b. Shadow Work Simulation (Underdamped BAOAB)
-    print(f"Running Underdamped BAOAB Simulation (dt={dt_viz_baoab})...")
-    num_steps_baoab = int(T_total_hist / dt_viz_baoab)
-    v_init = (torch.randn_like(x_init) * np.sqrt(kT)).to(device)
-    baoab = UnderdampedLangevin(potential, gamma=gamma, kT=kT, dt=dt_viz_baoab)
-    trajs_b, shadow_works_b = baoab.run_protocol(x_init, v_init, torch.zeros(num_steps_baoab).to(device))
+    # 1b. Shadow Work Simulation (Underdamped BAOAB) - Multiple dt values
+    dt_baoab_list = [0.1, 0.3, 0.5]  # Show progression of bias with dt
+    baoab_results = {}
     
-    final_x_b = trajs_b[-1]
-    final_w_b = shadow_works_b[-1]
-    
-    # Reweighting (BAOAB)
-    log_weights_b = -beta * final_w_b
-    valid_b = torch.isfinite(log_weights_b) & ~torch.isnan(final_x_b)
-    log_weights_b[~valid_b] = -1e10
-    log_weights_n_b = log_weights_b - torch.logsumexp(log_weights_b, dim=0)
-    weights_b = torch.exp(log_weights_n_b) * len(log_weights_b)
-    ess_baoab = (weights_b.sum()**2) / (weights_b**2).sum()
+    for dt_b in dt_baoab_list:
+        print(f"Running Underdamped BAOAB Simulation (dt={dt_b})...")
+        num_steps_baoab = int(T_total_hist / dt_b)
+        v_init = (torch.randn_like(x_init) * np.sqrt(kT)).to(device)
+        baoab = UnderdampedLangevin(potential, gamma=gamma, kT=kT, dt=dt_b)
+        trajs_b, shadow_works_b = baoab.run_protocol(x_init, v_init, torch.zeros(num_steps_baoab).to(device))
+        
+        final_x_b = trajs_b[-1]
+        final_w_b = shadow_works_b[-1]
+        
+        # Reweighting (BAOAB)
+        log_weights_b = -beta * final_w_b
+        valid_b = torch.isfinite(log_weights_b) & ~torch.isnan(final_x_b)
+        log_weights_b[~valid_b] = -1e10
+        log_weights_n_b = log_weights_b - torch.logsumexp(log_weights_b, dim=0)
+        weights_b = torch.exp(log_weights_n_b) * len(log_weights_b)
+        ess_baoab = (weights_b.sum()**2) / (weights_b**2).sum()
+        
+        baoab_results[dt_b] = {
+            'final_x': final_x_b.cpu(),
+            'weights': weights_b.cpu(),
+            'valid': valid_b.cpu().numpy(),
+            'ess': ess_baoab.item()
+        }
     
     # Plot Histograms
     bins = np.linspace(-2.5, 2.5, 50)
@@ -327,9 +235,6 @@ def run_dashboard_demo():
     final_x_o_cpu = final_x_o.cpu()
     weights_o_cpu = weights_o.cpu()
     valid_o_cpu = valid_o.cpu().numpy()
-    final_x_b_cpu = final_x_b.cpu()
-    weights_b_cpu = weights_b.cpu()
-    valid_b_cpu = valid_b.cpu().numpy()
 
     # Subplot 1: Overdamped
     ax_hist_shadow.plot(x_plot_cpu, p_true_cpu, 'k--', linewidth=2, label='True Boltzmann', zorder=10)
@@ -347,28 +252,37 @@ def run_dashboard_demo():
     ax_hist_shadow.set_xlabel("x")
     ax_hist_shadow.set_ylabel("Density")
 
-    # Subplot 2: BAOAB
-    ax_hist_mala.plot(x_plot_cpu, p_true_cpu, 'k--', linewidth=2, label='True Boltzmann', zorder=10)
+    # Subplot 2: BAOAB - Multiple dt values showing bias progression
+    ax_hist_mala.plot(x_plot_cpu, p_true_cpu, 'k--', linewidth=2.5, label='True Boltzmann', zorder=10)
     
-    # Biased
-    counts_biased_b, _ = np.histogram(final_x_b_cpu[valid_b_cpu].numpy(), bins=bins, density=True)
-    ax_hist_mala.plot(bin_centers, counts_biased_b, color=c_baoab, linewidth=1.5, linestyle=':', label=f'BAOAB Biased (dt={dt_viz_baoab})')
+    # Color gradient for different dt values (light to dark purple)
+    colors_baoab = ['#d4b8e0', '#9467bd', '#5a3d7a']  # Light purple to dark purple
     
-    # Debiased
-    counts_corr_b, _ = np.histogram(final_x_b_cpu[valid_b_cpu].numpy(), bins=bins, weights=weights_b_cpu[valid_b_cpu].numpy(), density=True)
-    ax_hist_mala.plot(bin_centers, counts_corr_b, color=c_baoab, linewidth=2.5, linestyle='-', label=f'BAOAB Debiased (ESS={int(ess_baoab.item())})')
+    for i, dt_b in enumerate(dt_baoab_list):
+        res = baoab_results[dt_b]
+        color = colors_baoab[i]
+        
+        # Biased (dotted)
+        counts_biased_b, _ = np.histogram(res['final_x'][res['valid']].numpy(), bins=bins, density=True)
+        ax_hist_mala.plot(bin_centers, counts_biased_b, color=color, linewidth=1.5, linestyle=':', 
+                         label=f'Biased dt={dt_b}', alpha=0.8)
+        
+        # Debiased (solid)
+        counts_corr_b, _ = np.histogram(res['final_x'][res['valid']].numpy(), bins=bins, 
+                                        weights=res['weights'][res['valid']].numpy(), density=True)
+        ax_hist_mala.plot(bin_centers, counts_corr_b, color=color, linewidth=2, linestyle='-', 
+                         label=f'Debiased dt={dt_b} (ESS={int(res["ess"])})')
     
-    ax_hist_mala.set_title("BAOAB Underdamped Debiasing", fontweight='bold')
-    ax_hist_mala.legend(loc='upper right', fontsize=8)
+    ax_hist_mala.set_title("BAOAB Debiasing: Effect of Time Step", fontweight='bold')
+    ax_hist_mala.legend(loc='upper right', fontsize=7, ncol=2)
     ax_hist_mala.set_xlabel("x")
     
-    # --- PART 2: EFFICIENCY SWEEP ---
-    print("\n--- Running Efficiency Sweep ---")
+    # --- PART 2: EFFICIENCY SWEEP (Weight ESS only) ---
+    print("\n--- Running Efficiency Sweep (Weight ESS) ---")
     dt_values = [0.01, 0.02, 0.03, 0.04, 0.06, 0.08, 0.12, 0.16, 0.20, 0.24, 0.32, 0.40, 0.50, 0.60, 0.80]
     
-    eff_mala_list, eff_shadow_list, eff_rwm_list = [], [], []
+    eff_shadow_list = []
     eff_baoab_list = [] 
-    ar_mala_list, ar_rwm_list = [], []
     shadow_accumulation_rates_over = [] 
     shadow_accumulation_rates_baoab = []
     
@@ -379,13 +293,7 @@ def run_dashboard_demo():
         ns = int(T_total_eff / dt)
         if ns < 10: ns = 10
         
-        # MALA
-        mala = MALAIntegrator(potential, gamma=gamma, kT=kT, dt=dt)
-        tm, am = mala.run(x_sweep, ns)
-        eff_mala_list.append(calculate_ess_dynamic(tm.cpu()) / ns)
-        ar_mala_list.append(am.mean().item())
-        
-        # Shadow (Overdamped)
+        # Shadow (Overdamped) - Weight ESS
         integ = OverdampedLangevin(potential, gamma=gamma, kT=kT, dt=dt)
         _, _, sw = integ.run_protocol(x_sweep, torch.zeros(ns).to(device))
         fw = sw[-1]
@@ -400,61 +308,56 @@ def run_dashboard_demo():
             ess_s = 1.0 / torch.sum(ws**2).item()
         eff_shadow_list.append(ess_s / ns)
         
-        # RWM
-        rwm = RWMIntegrator(potential, gamma=gamma, kT=kT, dt=dt)
-        tr, ar = rwm.run(x_sweep, ns)
-        eff_rwm_list.append(calculate_ess_dynamic(tr.cpu()) / ns)
-        ar_rwm_list.append(ar.mean().item())
-        
-        # BAOAB (Underdamped)
+        # BAOAB (Underdamped) - Weight ESS
         baoab = UnderdampedLangevin(potential, gamma=gamma, kT=kT, dt=dt)
         tb_traj, sw_b = baoab.run_protocol(x_sweep, v_sweep, torch.zeros(ns).to(device))
-        eff_baoab_list.append(calculate_ess_dynamic(tb_traj.cpu()) / ns)
-        shadow_accumulation_rates_baoab.append(sw_b[-1].mean().item() / T_total_eff)
+        fw_b = sw_b[-1]
+        shadow_accumulation_rates_baoab.append(fw_b.mean().item() / T_total_eff)
         
-        print(f"dt={dt:.3f} | Shd={eff_shadow_list[-1]:.1e} | MALA={eff_mala_list[-1]:.1e} | BAOAB={eff_baoab_list[-1]:.1e}")
+        lw_b = -beta * fw_b
+        if torch.isnan(lw_b).any() or torch.isinf(lw_b).any():
+            ess_b = 1e-10
+        else:
+            lw_b_n = lw_b - torch.logsumexp(lw_b, dim=0)
+            ws_b = torch.exp(lw_b_n)
+            ess_b = 1.0 / torch.sum(ws_b**2).item()
+        eff_baoab_list.append(ess_b / ns)
+        
+        print(f"dt={dt:.3f} | Overdamped={eff_shadow_list[-1]:.1e} | BAOAB={eff_baoab_list[-1]:.1e}")
 
-    # Plot Efficiency
-    ax_eff.plot(dt_values, eff_mala_list, 'o-', color=c_mala, label='MALA', linewidth=2)
-    ax_eff.plot(dt_values, eff_shadow_list, 's-', color=c_over, label='Langevin (Shadow reweighting)', linewidth=2)
-    ax_eff.plot(dt_values, eff_rwm_list, '^-', color=c_rwm, label='RWM', linewidth=2, linestyle='--')
-    ax_eff.plot(dt_values, eff_baoab_list, 'D-', color=c_baoab, label='BAOAB (Shadow reweighting)', linewidth=2)
+    # Plot Efficiency (Weight ESS only - comparable metrics)
+    ax_eff.plot(dt_values, eff_shadow_list, 's-', color=c_over, label='Overdamped Langevin', linewidth=2, markersize=8)
+    ax_eff.plot(dt_values, eff_baoab_list, 'D-', color=c_baoab, label='BAOAB (Underdamped)', linewidth=2, markersize=8)
     
     ax_eff.set_xlabel(r"Time Step $\Delta t$", fontweight='bold')
-    ax_eff.set_ylabel("Efficiency (ESS / Step)", fontweight='bold')
-    ax_eff.set_title("Sampling Efficiency Comparison", fontweight='bold')
+    ax_eff.set_ylabel("Weight ESS / Step", fontweight='bold')
+    ax_eff.set_title("Sampling Efficiency (Weight ESS)", fontweight='bold')
     ax_eff.set_yscale('log')
     ax_eff.set_ylim(bottom=1e-4)
     ax_eff.grid(True, alpha=0.3, which='both')
     ax_eff.legend()
     
-    # Plot Accumulation & Acceptance
-    ax_acc.plot(dt_values, ar_mala_list, 'o-', color=c_mala, label='MALA Acceptance')
-    ax_acc.plot(dt_values, ar_rwm_list, '^-', color=c_rwm, label='RWM Acceptance', linestyle='--')
-    
-    ax_acc2 = ax_acc.twinx()
-    ax_acc2.plot(dt_values, shadow_accumulation_rates_over, 's:', color=c_over, label='Overdamped Work Rate', linewidth=1.5)
-    ax_acc2.plot(dt_values, shadow_accumulation_rates_baoab, 'D:', color=c_baoab, label='BAOAB Work Rate', linewidth=1.5)
-    ax_acc2.set_ylabel(r"Shadow Work Rate ($\langle W \rangle / T$)", fontweight='bold')
+    # Plot Shadow Work Accumulation Rate
+    ax_acc.plot(dt_values, shadow_accumulation_rates_over, 's-', color=c_over, label='Overdamped', linewidth=2, markersize=8)
+    ax_acc.plot(dt_values, shadow_accumulation_rates_baoab, 'D-', color=c_baoab, label='BAOAB', linewidth=2, markersize=8)
     
     ax_acc.set_xlabel(r"Time Step $\Delta t$", fontweight='bold')
-    ax_acc.set_ylabel("Acceptance Probability", fontweight='bold')
-    ax_acc.set_title("Diagnostics: Acceptance & Work Rate", fontweight='bold')
-    ax_acc.set_ylim(0, 1.1)
+    ax_acc.set_ylabel(r"Shadow Work Rate ($\langle W \rangle / T$)", fontweight='bold')
+    ax_acc.set_title("Shadow Work Accumulation Rate", fontweight='bold')
     ax_acc.grid(True, alpha=0.3)
-    ax_acc.legend(loc='center left', fontsize=9)
+    ax_acc.legend()
     
     # --- PART 3: SHADOW WORK ACCUMULATION ---
     print("\n--- Generating Accumulation Plots ---")
     
-    # Baseline comparison
-    dt_baseline = 0.01
+    # Use same dt values as BAOAB debiasing plot for consistency
+    dt_accum_list = [0.01, 0.05] + dt_baoab_list  # [0.01, 0.05, 0.1, 0.3, 0.5]
     
-    for dt in [dt_baseline, dt_viz_over, dt_viz_baoab]:
+    for dt in dt_accum_list:
         ns = int(T_total_hist / dt)
         t_axis = np.arange(ns) * dt
-        alpha = 0.3 if dt == dt_baseline else 1.0
-        lw = 1.5 if dt == dt_baseline else 2.5
+        alpha = 0.4 if dt == 0.01 else 1.0
+        lw = 1.0 if dt == 0.01 else 2.0
         
         # Overdamped: only plot for small/medium steps to avoid blowup
         if dt <= 0.05:
@@ -465,9 +368,9 @@ def run_dashboard_demo():
             mean_w = sw.mean(dim=1).cpu().numpy()
             ax_accum.plot(t_axis, mean_w, color=c_over, linewidth=lw, alpha=alpha, label=f'Overdamped (dt={dt})')
         
-        # Underdamped: plot for all (including the large step)
+        # Underdamped: plot for all dt values
         baoab = UnderdampedLangevin(potential, gamma=gamma, kT=kT, dt=dt)
-        v_start = (torch.randn(1000, device=device) * np.sqrt(kT)).to(device) # Small batch for accum
+        v_start = (torch.randn(1000, device=device) * np.sqrt(kT)).to(device)
         x_start_b = x_init[:1000].to(device)
         _, sw_b = baoab.run_protocol(x_start_b, v_start, torch.zeros(ns).to(device))
         mean_w_b = sw_b.mean(dim=1).cpu().numpy()

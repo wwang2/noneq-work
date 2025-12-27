@@ -13,10 +13,27 @@ This repository contains simulations and notes exploring non-equilibrium thermod
 ### Jarzynski & Crooks Fluctuation Theorems
 ![Fluctuation Theorems Demo](assets/fluctuation_demo.gif)
 
-### Shadow Work & Debiasing
+### Shadow Work Correction for Free Energy Estimation
+
+Using shadow work to correct Jarzynski free energy estimates at large time steps:
+
+![Jarzynski Shadow Work Dashboard](assets/jarzynski_shadow_work.png)
+
+Key insight: The Jarzynski estimate uses exponential averaging, not arithmetic mean. The solid lines show Jarzynski estimates $\Delta F = -k_BT \ln \langle e^{-\beta W} \rangle$, while dotted lines show arithmetic means $\langle W \rangle$ (which always overestimate ΔF by the second law).
+
+![Jarzynski Protocol Animation](assets/jarzynski_protocol.gif)
+
+### Shadow Work & Equilibrium Debiasing
+
 Demonstrating how finite-timestep discretization bias can be corrected using shadow work importance weights (based on [Sivak et al., 2013](https://arxiv.org/pdf/1107.2967)).
 
 ![Work Reweighting Dashboard](assets/work_reweighting.png)
+
+### Computational-Thermodynamic Trade-off
+
+With a fixed compute budget (number of steps), there's an optimal protocol duration that minimizes total work:
+
+![Compute Thermo Tradeoff](assets/compute_thermo_tradeoff.png)
 
 
 ## Key References

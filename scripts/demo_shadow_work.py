@@ -6,24 +6,11 @@ from tqdm import tqdm
 from noneq.potentials import DoubleWellPotential
 from noneq.integrators import OverdampedLangevin
 
-# Applying plotting style
-plt.rcParams.update({
-    "font.family": "monospace",
-    "font.monospace": ["DejaVu Sans Mono", "Menlo", "Consolas", "Monaco"],
-    "font.size": 12,
-    "axes.titlesize": 13,
-    "axes.labelsize": 12,
-    "xtick.labelsize": 11,
-    "ytick.labelsize": 11,
-    "legend.fontsize": 10,
-    "axes.grid": True,
-    "grid.alpha": 0.25,
-    "grid.linewidth": 0.7,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "figure.facecolor": "white",
-    "axes.facecolor": "white",
-})
+# Import shared plotting style
+from plot_style import apply_style, COLORS
+
+# Apply consistent style
+apply_style()
 
 # --- Helper Classes ---
 class UnderdampedLangevin:
@@ -157,12 +144,12 @@ def run_dashboard_demo():
     assets_dir = "/Users/wujiewang/projects/noneq-work/assets"
     os.makedirs(assets_dir, exist_ok=True)
     
-    # Colors (Consistent Theme)
+    # Colors (Consistent Theme from shared style)
     c_true = 'black'
-    c_over = '#ff7f0e' # Orange
-    c_baoab = '#9467bd' # Purple
-    c_mala = '#1f77b4' # Blue
-    c_rwm = '#7f7f7f' # Gray
+    c_over = COLORS['secondary']   # Orange
+    c_baoab = COLORS['tertiary']   # Purple
+    c_mala = COLORS['primary']     # Blue
+    c_rwm = COLORS['neutral']      # Gray
     
     # --- PART 1: DISTRIBUTIONS (Shadow vs MALA) ---
     print("\n--- Generating Distributions (Shadow vs MALA) ---")
@@ -174,7 +161,7 @@ def run_dashboard_demo():
     p_true /= p_true.sum() * (x_plot[1] - x_plot[0])
     
     # Target dt for visualization
-    dt_viz_over = 0.05
+    dt_viz_over = 0.07
     dt_viz_baoab = 0.5 # Very large step to show visible bias and correction
     
     x_init = get_boltzmann_samples(potential, 0.0, kT, num_trajectories, x_range=(-2.5, 2.5)).to(device)
